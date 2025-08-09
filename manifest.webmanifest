@@ -1,0 +1,11 @@
+{
+  "name": "BreachedCheck",
+  "short_name": "BreachedCheck",
+  "start_url": "index.html",
+  "display": "standalone",
+  "background_color": "#0b0b0c",
+  "theme_color": "#0b0b0c",
+  "icons": [
+    { "src": "assets/img/logo.svg", "sizes": "192x192", "type": "image/svg+xml", "purpose": "any maskable" }
+  ]
+}
