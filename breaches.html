@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>BreachedCheck — Breaches</title>
+<link rel="stylesheet" href="assets/css/style.css"/>
+<script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+</head>
+<body>
+<div class="container">
+  <nav class="nav">
+    <div class="row" style="gap:6px;align-items:center">
+      <img src="assets/img/logo.svg" alt="" style="width:28px;height:28px"/>
+      <strong>BreachedCheck</strong>
+    </div>
+    <div class="row" style="gap:6px">
+      <a href="index.html">Home</a>
+      <a href="breaches.html">Breaches</a>
+      <a href="stats.html">Stats</a>
+      <button id="btnTheme" class="btn" type="button">Theme</button>
+      <select id="lang" class="input" style="max-width:120px"><option value="id">ID</option><option value="en">EN</option></select>
+    </div>
+  </nav>
+
+  <div class="card">
+    <h1>📚 Catalog Breaches</h1>
+    <div class="row" style="margin-top:6px">
+      <input id="q" class="input col" placeholder="Cari nama/domain"/>
+      <select id="f-data" class="input" style="max-width:220px">
+        <option value="">Data Class (All)</option>
+        <option>Email addresses</option>
+        <option>Passwords</option>
+        <option>IP addresses</option>
+        <option>Names</option>
+        <option>Phone numbers</option>
+      </select>
+      <button id="btnSearch" class="btn">Search</button>
+    </div>
+  </div>
+
+  <div id="breachList" class="card"></div>
+
+  <div class="footer">© 2025 BreachedCheck — Frontend</div>
+</div>
+<script type="module" src="assets/js/theme.js"></script>
+<script type="module" src="assets/js/i18n.js"></script>
+<script type="module" src="assets/js/breaches.js"></script>
+</body>
+</html>
