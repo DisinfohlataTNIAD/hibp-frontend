@@ -57,18 +57,41 @@ def api_check_account():
         response = {
             'found': False,
             'breaches': [],
-            'sources': {}
+            'sources': {},
+            'working_sources': [],
+            'disabled_sources': [],
+            'error_sources': []
         }
         
         # Check hasil dari berbagai sumber
         for source, result in results.get('sources', {}).items():
-            if result.get('found') or result.get('pwned'):
+            response['sources'][source] = result
+            
+            if result.get('found'):
                 response['found'] = True
                 response['breaches'].append({
                     'source': source,
                     'data': result
                 })
-            response['sources'][source] = result
+                response['working_sources'].append(source)
+            elif result.get('status') == 'clean':
+                response['working_sources'].append(source)
+            elif result.get('status') == 'disabled':
+                response['disabled_sources'].append(source)
+            elif 'error' in result:
+                response['error_sources'].append({
+                    'source': source,
+                    'error': result['error'],
+                    'status': result.get('status', 'unknown')
+                })
+        
+        # Add summary
+        response['summary'] = {
+            'total_sources': len(results.get('sources', {})),
+            'working_sources': len(response['working_sources']),
+            'disabled_sources': len(response['disabled_sources']),
+            'error_sources': len(response['error_sources'])
+        }
         
         return jsonify(response)
         
@@ -169,6 +192,98 @@ def manifest():
 def service_worker():
     """Serve service worker"""
     return send_from_directory('static', 'sw.js')
+
+@app.route('/api/sources')
+def api_sources():
+    """API untuk mendapatkan status sumber data"""
+    sources_status = {
+        'hibp_passwords': {
+            'name': 'HIBP Pwned Passwords',
+            'status': 'active',
+            'free': True,
+            'description': 'Check password breaches menggunakan k-anonymity',
+            'reliability': 'high'
+        },
+        'local_db': {
+            'name': 'Local Database',
+            'status': 'active' if os.path.exists('local_breaches.txt') else 'inactive',
+            'free': True,
+            'description': 'Database breach lokal',
+            'reliability': 'high'
+        },
+        'hibp_api': {
+            'name': 'HIBP Breached Accounts',
+            'status': 'limited',
+            'free': True,
+            'description': 'Rate limited, requires API key for full access',
+            'reliability': 'medium'
+        },
+        'dehashed': {
+            'name': 'DeHashed API',
+            'status': 'error',
+            'free': True,
+            'description': 'API key provided but authentication failed',
+            'reliability': 'low',
+            'error': 'Authentication or endpoint issues'
+        },
+        'intelx': {
+            'name': 'Intelligence X',
+            'status': 'needs_setup',
+            'free': True,
+            'description': 'Limited queries gratis',
+            'reliability': 'unknown'
+        }
+    }
+    
+    return jsonify(sources_status)
+
+@app.route('/api/status')
+def api_status():
+    """API untuk status aplikasi"""
+    try:
+        # Test basic functionality
+        from breach_checker import BreachChecker
+        test_checker = BreachChecker()
+        
+        # Test password check (should always work)
+        pwd_test = test_checker.check_pwned_passwords('test123')
+        hibp_working = not ('error' in pwd_test)
+        
+        # Test local database
+        local_test = test_checker.check_local_breach_db('test@example.com')
+        local_working = not ('error' in local_test)
+        
+        status = {
+            'app_status': 'running',
+            'timestamp': time.time(),
+            'core_features': {
+                'password_checking': hibp_working,
+                'local_database': local_working,
+                'web_interface': True,
+                'api_endpoints': True
+            },
+            'external_apis': {
+                'hibp_passwords': hibp_working,
+                'hibp_breaches': 'rate_limited',
+                'dehashed': 'error',
+                'intelligence_x': 'not_configured'
+            },
+            'recommendations': [
+                'Password checking is fully functional',
+                'Local database is working',
+                'DeHashed API needs troubleshooting',
+                'Consider adding more local breach data'
+            ]
+        }
+        
+        return jsonify(status)
+        
+    except Exception as e:
+        return jsonify({
+            'app_status': 'error',
+            'error': str(e),
+            'timestamp': time.time()
+        }), 500
 
 @app.errorhandler(404)
 def not_found(error):

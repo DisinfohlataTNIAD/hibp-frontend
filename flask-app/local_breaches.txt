@@ -2,3 +2,9 @@ test@example.com
 admin@test.com
 user@breach.com
 leaked@email.com
+john.doe@company.com
+admin@vulnerable.com
+user123@oldsite.com
+contact@breached.org
+info@compromised.net
+support@hacked.com
