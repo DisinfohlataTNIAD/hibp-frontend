@@ -1,19 +1,23 @@
 #!/usr/bin/env python3
 """
-Flask Web Application untuk Breach Checker
-Menggunakan UI yang sudah ada dengan backend Python
+Flask Application untuk Breach Checker
+Clean architecture dengan separation of concerns
 """
 
 from flask import Flask, render_template, request, jsonify, send_from_directory
 import sys
 import os
+import time
+from datetime import datetime
 
-# Add parent directory to path untuk import breach_checker
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+# Import refactored components
+from config import get_config, validate_config
 from breach_checker import BreachChecker
 
+# Get configuration
+config_class = get_config()
 app = Flask(__name__)
-app.secret_key = 'your-secret-key-change-this'
+app.config.from_object(config_class)
 
 # Initialize breach checker
 checker = BreachChecker()
@@ -38,7 +42,7 @@ def stats():
     """Stats page"""
     return render_template('stats.html')
 
-# API Endpoints untuk frontend JavaScript
+# API Endpoints
 
 @app.route('/api/check-account', methods=['POST'])
 def api_check_account():
@@ -50,48 +54,25 @@ def api_check_account():
         if not account:
             return jsonify({'error': 'Account tidak boleh kosong'}), 400
         
-        # Check menggunakan breach checker
-        results = checker.comprehensive_check(account)
+        # Check menggunakan refactored breach checker
+        results = checker.check_email(account)
         
-        # Format response untuk frontend
+        # Format response untuk frontend compatibility
         response = {
-            'found': False,
+            'found': results['summary']['found'],
             'breaches': [],
-            'sources': {},
-            'working_sources': [],
-            'disabled_sources': [],
-            'error_sources': []
+            'sources': results['sources'],
+            'summary': results['summary'],
+            'timestamp': results['timestamp']
         }
         
-        # Check hasil dari berbagai sumber
-        for source, result in results.get('sources', {}).items():
-            response['sources'][source] = result
-            
-            if result.get('found'):
-                response['found'] = True
+        # Extract breach details
+        for source_name, source_result in results['sources'].items():
+            if source_result.get('found'):
                 response['breaches'].append({
-                    'source': source,
-                    'data': result
+                    'source': source_name,
+                    'data': source_result
                 })
-                response['working_sources'].append(source)
-            elif result.get('status') == 'clean':
-                response['working_sources'].append(source)
-            elif result.get('status') == 'disabled':
-                response['disabled_sources'].append(source)
-            elif 'error' in result:
-                response['error_sources'].append({
-                    'source': source,
-                    'error': result['error'],
-                    'status': result.get('status', 'unknown')
-                })
-        
-        # Add summary
-        response['summary'] = {
-            'total_sources': len(results.get('sources', {})),
-            'working_sources': len(response['working_sources']),
-            'disabled_sources': len(response['disabled_sources']),
-            'error_sources': len(response['error_sources'])
-        }
         
         return jsonify(response)
         
@@ -108,10 +89,40 @@ def api_check_password():
         if not password:
             return jsonify({'error': 'Password tidak boleh kosong'}), 400
         
-        # Check password menggunakan HIBP k-anonymity
-        result = checker.check_pwned_passwords(password)
+        # Check password menggunakan refactored checker
+        results = checker.check_password(password)
         
-        return jsonify(result)
+        # Format response untuk frontend compatibility
+        hibp_result = results['sources'].get('hibp', {})
+        response = {
+            'pwned': hibp_result.get('pwned', False),
+            'count': hibp_result.get('count', 0),
+            'message': hibp_result.get('message', 'Password check completed'),
+            'sources': results['sources'],
+            'summary': results['summary'],
+            'timestamp': results['timestamp']
+        }
+        
+        return jsonify(response)
+        
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/comprehensive-check', methods=['POST'])
+def api_comprehensive_check():
+    """API endpoint untuk comprehensive check (email + password)"""
+    try:
+        data = request.get_json()
+        email = data.get('email', '').strip()
+        password = data.get('password', '').strip()
+        
+        if not email:
+            return jsonify({'error': 'Email tidak boleh kosong'}), 400
+        
+        # Comprehensive check
+        results = checker.comprehensive_check(email, password if password else None)
+        
+        return jsonify(results)
         
     except Exception as e:
         return jsonify({'error': str(e)}), 500
@@ -127,12 +138,80 @@ def api_notify():
         if not target:
             return jsonify({'error': 'Target tidak boleh kosong'}), 400
         
-        # Untuk sekarang, hanya return success
-        # Anda bisa implement notification system di sini
+        # For now, just return success (implement notification system later)
         return jsonify({
             'success': True,
-            'message': f'Subscription untuk "{target}" berhasil ditambahkan'
+            'message': f'Subscription untuk "{target}" berhasil ditambahkan',
+            'timestamp': datetime.now().isoformat()
         })
+        
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/status')
+def api_status():
+    """API endpoint untuk system status"""
+    try:
+        status = checker.get_status()
+        
+        # Add system info
+        status['system'] = {
+            'app_version': '2.0.0',
+            'python_version': sys.version,
+            'flask_debug': app.debug,
+            'uptime': time.time() - app.start_time if hasattr(app, 'start_time') else 0
+        }
+        
+        return jsonify(status)
+        
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/sources')
+def api_sources():
+    """API untuk mendapatkan status sumber data"""
+    try:
+        config_status = validate_config()
+        
+        sources_status = {
+            'hibp_passwords': {
+                'name': 'HIBP Pwned Passwords',
+                'status': 'active',
+                'free': True,
+                'description': 'Check password breaches menggunakan k-anonymity',
+                'reliability': 'high'
+            },
+            'local_db': {
+                'name': 'Local Database',
+                'status': config_status['api_status'].get('local_db', 'unknown'),
+                'free': True,
+                'description': 'Database breach lokal',
+                'reliability': 'high'
+            },
+            'hibp_api': {
+                'name': 'HIBP Breached Accounts',
+                'status': 'limited',
+                'free': True,
+                'description': 'Rate limited, requires API key for full access',
+                'reliability': 'medium'
+            },
+            'dehashed': {
+                'name': 'DeHashed API v2',
+                'status': config_status['api_status'].get('dehashed', 'unknown'),
+                'free': True,
+                'description': 'Password search working, email search requires subscription',
+                'reliability': 'medium'
+            },
+            'intelx': {
+                'name': 'Intelligence X',
+                'status': config_status['api_status'].get('intelx', 'unknown'),
+                'free': True,
+                'description': 'Limited queries gratis',
+                'reliability': 'unknown'
+            }
+        }
+        
+        return jsonify(sources_status)
         
     except Exception as e:
         return jsonify({'error': str(e)}), 500
@@ -140,25 +219,28 @@ def api_notify():
 @app.route('/api/breaches')
 def api_breaches():
     """API endpoint untuk mendapatkan daftar breaches"""
-    # Sample data - Anda bisa ganti dengan data real
+    # Sample data - implement with real breach database later
     breaches = [
         {
             'name': 'LinkedIn',
             'date': '2012-06-05',
             'accounts': 164000000,
-            'description': 'Professional networking platform breach'
+            'description': 'Professional networking platform breach',
+            'verified': True
         },
         {
             'name': 'Yahoo',
             'date': '2013-08-01',
             'accounts': 3000000000,
-            'description': 'Massive email service breach'
+            'description': 'Massive email service breach',
+            'verified': True
         },
         {
             'name': 'Facebook',
             'date': '2019-04-01',
             'accounts': 533000000,
-            'description': 'Social media platform data exposure'
+            'description': 'Social media platform data exposure',
+            'verified': True
         }
     ]
     
@@ -166,18 +248,26 @@ def api_breaches():
 
 @app.route('/api/stats')
 def api_stats():
-    """API endpoint untuk statistik"""
-    # Sample stats - Anda bisa implement real stats
-    stats = {
-        'total_breaches': 500,
-        'total_accounts': 12000000000,
-        'recent_breaches': 25,
-        'last_updated': '2024-08-10'
-    }
-    
-    return jsonify(stats)
+    """API endpoint untuk statistik aplikasi"""
+    try:
+        # Get system stats
+        system_stats = checker.get_status()
+        
+        # Get local database stats
+        local_stats = checker.get_local_db_stats()
+        
+        stats = {
+            'system': system_stats,
+            'local_database': local_stats,
+            'last_updated': datetime.now().isoformat()
+        }
+        
+        return jsonify(stats)
+        
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
-# Serve static files (assets)
+# Static file serving
 @app.route('/assets/<path:filename>')
 def serve_assets(filename):
     """Serve static assets"""
@@ -193,98 +283,7 @@ def service_worker():
     """Serve service worker"""
     return send_from_directory('static', 'sw.js')
 
-@app.route('/api/sources')
-def api_sources():
-    """API untuk mendapatkan status sumber data"""
-    sources_status = {
-        'hibp_passwords': {
-            'name': 'HIBP Pwned Passwords',
-            'status': 'active',
-            'free': True,
-            'description': 'Check password breaches menggunakan k-anonymity',
-            'reliability': 'high'
-        },
-        'local_db': {
-            'name': 'Local Database',
-            'status': 'active' if os.path.exists('local_breaches.txt') else 'inactive',
-            'free': True,
-            'description': 'Database breach lokal',
-            'reliability': 'high'
-        },
-        'hibp_api': {
-            'name': 'HIBP Breached Accounts',
-            'status': 'limited',
-            'free': True,
-            'description': 'Rate limited, requires API key for full access',
-            'reliability': 'medium'
-        },
-        'dehashed': {
-            'name': 'DeHashed API',
-            'status': 'error',
-            'free': True,
-            'description': 'API key provided but authentication failed',
-            'reliability': 'low',
-            'error': 'Authentication or endpoint issues'
-        },
-        'intelx': {
-            'name': 'Intelligence X',
-            'status': 'needs_setup',
-            'free': True,
-            'description': 'Limited queries gratis',
-            'reliability': 'unknown'
-        }
-    }
-    
-    return jsonify(sources_status)
-
-@app.route('/api/status')
-def api_status():
-    """API untuk status aplikasi"""
-    try:
-        # Test basic functionality
-        from breach_checker import BreachChecker
-        test_checker = BreachChecker()
-        
-        # Test password check (should always work)
-        pwd_test = test_checker.check_pwned_passwords('test123')
-        hibp_working = not ('error' in pwd_test)
-        
-        # Test local database
-        local_test = test_checker.check_local_breach_db('test@example.com')
-        local_working = not ('error' in local_test)
-        
-        status = {
-            'app_status': 'running',
-            'timestamp': time.time(),
-            'core_features': {
-                'password_checking': hibp_working,
-                'local_database': local_working,
-                'web_interface': True,
-                'api_endpoints': True
-            },
-            'external_apis': {
-                'hibp_passwords': hibp_working,
-                'hibp_breaches': 'rate_limited',
-                'dehashed': 'error',
-                'intelligence_x': 'not_configured'
-            },
-            'recommendations': [
-                'Password checking is fully functional',
-                'Local database is working',
-                'DeHashed API needs troubleshooting',
-                'Consider adding more local breach data'
-            ]
-        }
-        
-        return jsonify(status)
-        
-    except Exception as e:
-        return jsonify({
-            'app_status': 'error',
-            'error': str(e),
-            'timestamp': time.time()
-        }), 500
-
+# Error handlers
 @app.errorhandler(404)
 def not_found(error):
     return jsonify({'error': 'Endpoint tidak ditemukan'}), 404
@@ -293,14 +292,54 @@ def not_found(error):
 def internal_error(error):
     return jsonify({'error': 'Internal server error'}), 500
 
-if __name__ == '__main__':
-    print("🚀 Starting BreachedCheck Flask App...")
-    print("📱 Access at: http://localhost:5000")
-    print("🔍 API endpoints:")
-    print("   - POST /api/check-account")
-    print("   - POST /api/check-password") 
-    print("   - POST /api/notify")
-    print("   - GET /api/breaches")
-    print("   - GET /api/stats")
+@app.errorhandler(429)
+def rate_limit_error(error):
+    return jsonify({'error': 'Rate limit exceeded. Please try again later.'}), 429
+
+# Application startup
+def create_app(config_name=None):
+    """Application factory"""
+    config_class = get_config(config_name)
+    app.config.from_object(config_class)
     
-    app.run(debug=True, host='0.0.0.0', port=5000)
+    # Set start time for uptime calculation
+    app.start_time = time.time()
+    
+    return app
+
+if __name__ == '__main__':
+    # Validate configuration on startup
+    config_status = validate_config()
+    
+    print("🚀 Starting BreachedCheck Flask App...")
+    print("=" * 50)
+    print(f"📱 Access at: http://localhost:{app.config['PORT']}")
+    print(f"🔧 Debug mode: {app.config['DEBUG']}")
+    print(f"⚙️  Configuration valid: {config_status['valid']}")
+    
+    if config_status['warnings']:
+        print("⚠️  Warnings:")
+        for warning in config_status['warnings']:
+            print(f"   - {warning}")
+    
+    print("\n🔍 Available API endpoints:")
+    endpoints = [
+        "POST /api/check-account",
+        "POST /api/check-password", 
+        "POST /api/comprehensive-check",
+        "POST /api/notify",
+        "GET /api/status",
+        "GET /api/sources",
+        "GET /api/breaches",
+        "GET /api/stats"
+    ]
+    for endpoint in endpoints:
+        print(f"   - {endpoint}")
+    
+    print("\n" + "=" * 50)
+    
+    app.run(
+        debug=app.config['DEBUG'],
+        host=app.config['HOST'],
+        port=app.config['PORT']
+    )
